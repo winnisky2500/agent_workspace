@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent 自动拓客监控台 - 底层平台</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ================= 变量与全局设置 ================= */
+        :root {
+            --primary-blue: #0A1931;       
+            --tech-blue: #008DDA;          
+            --tech-cyan: #41C9E2;          
+            --bg-color: #F4F7F9;           
+            --card-bg: #FFFFFF;            
+            --text-main: #333333;
+            --text-muted: #666666;
+            --border-color: #E2E8F0;
+            --success: #28A745;            
+            --warning: #F5A623;            
+            --danger: #D0021B;             
+            --rank-S: #FF4D4F;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Microsoft YaHei", sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-main); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* ================= 顶栏 ================= */
+        .navbar {
+            height: 60px; background-color: var(--primary-blue); color: white;
+            display: flex; align-items: center; justify-content: space-between; padding: 0 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 100; flex-shrink: 0;
+        }
+        .nav-logo { font-size: 18px; font-weight: bold; display: flex; align-items: center; gap: 10px; }
+        .nav-logo .tag { font-size: 12px; background: linear-gradient(90deg, #6B21A8, var(--tech-cyan)); padding: 2px 8px; border-radius: 4px; font-weight: normal; }
+        .nav-user { display: flex; align-items: center; gap: 20px; font-size: 14px; }
+
+        .btn { padding: 8px 16px; border-radius: 4px; font-size: 13px; cursor: pointer; border: none; transition: all 0.3s; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-outline { background: transparent; border: 1px solid var(--tech-blue); color: var(--tech-blue); }
+        .btn-outline:hover { background: #F0F7FF; }
+        .btn-primary { background: var(--tech-blue); color: white; }
+        .btn-primary:hover { background: #0076B6; }
+
+        .view-container { flex: 1; display: none; overflow: hidden; }
+        .view-container.active { display: flex; }
+
+        /* ================= 视图二：思考留痕 (Trace Workspace) ================= */
+        .trace-layout { display: flex; width: 100%; height: 100%; }
+        
+        /* 左侧：商机列表与组织架构 */
+        .trace-left { width: 300px; background: var(--card-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; flex-shrink: 0; }
+        .trace-left-header { padding: 16px; background: var(--primary-blue); color: white; font-weight: bold; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: 0.3s; flex-shrink: 0;}
+        .trace-left-header:hover { opacity: 0.9; }
+        
+        /* 左上：商机列表 */
+        .opp-list-area { flex: 1; overflow-y: auto; border-bottom: 4px solid var(--bg-color); }
+        .opp-item { padding: 16px; border-bottom: 1px solid var(--border-color); cursor: pointer; border-left: 3px solid transparent; }
+        .opp-item:hover { background: #F8FAFC; }
+        .opp-item.active { background: #E6F3FF; border-left-color: var(--tech-blue); }
+        .opp-title { font-weight: bold; margin-bottom: 6px; color: var(--primary-blue); display: flex; justify-content: space-between;}
+        .opp-desc { font-size: 12px; color: var(--text-muted); line-height: 1.4; }
+
+        /* 左下：Agent 组织架构图 */
+        .topology-area { height: 260px; padding: 16px; background: #FAFAFC; flex-shrink: 0; display: flex; flex-direction: column;}
+        .topo-title { font-size: 13px; font-weight: bold; color: var(--primary-blue); margin-bottom: 16px; display: flex; align-items: center; gap: 6px; }
+        .topo-tree { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; }
+        .topo-node { background: white; border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; font-size: 12px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.02); transition: 0.2s; position: relative; z-index: 2; text-align: center; width: 120px;}
+        .topo-node:hover { border-color: var(--tech-blue); color: var(--tech-blue); transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,141,218,0.1); }
+        .topo-node.master { border-color: var(--tech-blue); border-left: 4px solid var(--tech-blue); margin-bottom: 24px; }
+        .topo-branches { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; width: 100%; position: relative;}
+        /* 画连接线 */
+        .topo-tree::before { content: ''; position: absolute; top: 32px; width: 1px; height: 24px; background: #CBD5E1; z-index: 1;}
+        .topo-branches::before { content: ''; position: absolute; top: -12px; left: 25%; width: 50%; height: 1px; background: #CBD5E1; z-index: 1;}
+        .topo-branches::after { content: ''; position: absolute; top: -12px; left: 25%; width: 1px; height: 12px; background: #CBD5E1; z-index: 1;}
+        .topo-branches-line2 { position: absolute; top: -12px; right: 25%; width: 1px; height: 12px; background: #CBD5E1; z-index: 1;}
+
+        /* 中间：主视图 (会议复盘) */
+        .trace-middle { flex: 1; background: var(--bg-color); overflow-y: auto; padding: 24px; position: relative; display: flex; flex-direction: column; }
+        .process-title { font-size: 18px; font-weight: bold; color: var(--primary-blue); margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+        .meeting-intro { font-size: 13px; color: var(--text-muted); background: #E6F3FF; padding: 12px 16px; border-radius: 6px; border-left: 4px solid var(--tech-blue); margin-bottom: 24px; line-height: 1.5; }
+        
+        .round-divider { display: flex; align-items: center; text-align: center; margin: 30px 0 20px 0; color: #94A3B8; font-size: 12px; font-weight: bold; letter-spacing: 1px;}
+        .round-divider::before, .round-divider::after { content: ''; flex: 1; border-bottom: 1px dashed #CBD5E1; }
+        .round-divider::before { margin-right: 16px; }
+        .round-divider::after { margin-left: 16px; }
+        .round-divider span { background: #E2E8F0; padding: 4px 12px; border-radius: 12px; color: #475569;}
+
+        /* Agent 讨论区样式 */
+        .agent-msg { display: flex; gap: 16px; margin-bottom: 20px; }
+        .agent-avatar { width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: white; flex-shrink: 0; box-shadow: 0 2px 6px rgba(0,0,0,0.1);}
+        .av-master { background: linear-gradient(135deg, var(--primary-blue), #1E3A8A); }
+        .av-bd { background: #1890FF; }
+        .av-tech { background: #722ED1; }
+        .av-risk { background: var(--danger); }
+        .av-prod { background: var(--warning); }
+        
+        .agent-content { background: var(--card-bg); padding: 16px 20px; border-radius: 8px; flex: 1; border: 1px solid var(--border-color); font-size: 13px; line-height: 1.6; box-shadow: 0 2px 8px rgba(0,0,0,0.03);}
+        .agent-content.master-box { border-color: #BAE0FF; border-top: 3px solid var(--tech-blue); }
+        
+        .agent-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid #F1F5F9; padding-bottom: 8px;}
+        .agent-name { font-size: 14px; font-weight: bold; color: var(--primary-blue); }
+        .agent-time { font-family: monospace; color: #94A3B8; font-size: 12px; background: #F8FAFC; padding: 2px 6px; border-radius: 4px; border: 1px solid #E2E8F0;}
+        
+        /* 任务标签与高亮 */
+        .sys-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .s-badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; font-weight: bold;}
+        .s-badge.done { background: #F6FFED; color: var(--success); border: 1px solid #B7EB8F; }
+        .s-badge.conflict { background: #FFF1F0; color: var(--danger); border: 1px solid #FFA39E; }
+        .s-badge.action { background: #E6F7FF; color: var(--tech-blue); border: 1px solid #91D5FF; }
+
+        .content-block { margin-bottom: 12px; }
+        .content-block strong { color: var(--primary-blue); display: inline-block; margin-bottom: 4px;}
+        .conclusion-box { background: #FAFAFC; padding: 10px 12px; border-left: 3px solid var(--tech-blue); border-radius: 4px; margin-top: 8px;}
+        .conclusion-box.risk-alert { border-left-color: var(--danger); background: #FFF1F0; }
+        .conclusion-box.success-alert { border-left-color: var(--success); background: #F6FFED; }
+        
+        ul.reasons { margin-left: 20px; color: var(--text-muted); }
+        ul.reasons li { margin-bottom: 4px; }
+
+        /* 右侧：产出物视图 */
+        .trace-right { width: 340px; background: var(--card-bg); border-left: 1px solid var(--border-color); padding: 20px; overflow-y: auto; flex-shrink: 0; }
+        .right-title { font-size: 15px; font-weight: bold; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid var(--bg-color); display: flex; align-items: center; gap: 8px;}
+        
+        .output-group { margin-bottom: 24px; }
+        .output-group-title { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;}
+        
+        .doc-file { display: flex; align-items: flex-start; gap: 10px; padding: 12px; background: #fff; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 10px; cursor: pointer; transition: 0.2s; }
+        .doc-file:hover { border-color: var(--tech-blue); box-shadow: 0 2px 6px rgba(0,141,218,0.1); transform: translateY(-1px); }
+        .doc-icon { font-size: 20px; color: var(--danger); margin-top: 2px;} 
+        .doc-icon.word { color: #2B579A; }
+        .doc-icon.excel { color: #217346; }
+        .doc-icon.image { color: var(--success); }
+        .doc-info { flex: 1; }
+        .doc-name { font-size: 13px; font-weight: bold; color: var(--primary-blue); margin-bottom: 4px; line-height: 1.3;}
+        .doc-meta { font-size: 11px; color: #999; display: flex; justify-content: space-between; }
+        
+        /* 弹窗样式 */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(10, 25, 49, 0.6); display: none; justify-content: center; align-items: center; z-index: 1000; }
+        .modal-box { background: var(--card-bg); border-radius: 8px; width: 700px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+        .modal-header { padding: 16px 24px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 16px; }
+        .modal-header i { cursor: pointer; color: #999; transition: 0.3s; }
+        .modal-header i:hover { color: var(--danger); }
+        .modal-body { padding: 24px; overflow-y: auto; flex: 1; font-size: 14px; line-height: 1.6; }
+        .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 12px; background: #FAFAFC; border-radius: 0 0 8px 8px; }
+        
+        .config-code { background: #1E293B; color: #E2E8F0; padding: 16px; border-radius: 6px; font-family: monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; margin-bottom: 16px;}
+        .skill-tag { display: inline-flex; align-items: center; gap: 6px; background: #E6F3FF; color: var(--tech-blue); padding: 4px 10px; border-radius: 16px; font-size: 12px; margin-right: 8px; margin-bottom: 8px; border: 1px solid #BAE0FF; }
+    </style>
+</head>
+<body>
+
+    <!-- 顶栏 -->
+    <header class="navbar">
+        <div class="nav-logo">
+            <i class="fa-solid fa-server"></i> Agent Workspace 
+        </div>
+        <div class="nav-user">
+            <button class="btn btn-outline" style="border-color: rgba(255,255,255,0.3); color: white;" onclick="window.close()">
+                <i class="fa-solid fa-desktop"></i> 返回业务前台
+            </button>
+        </div>
+    </header>
+
+    <div id="view-trace" class="view-container active">
+        <div class="trace-layout">
+            
+            <!-- 左侧：商机列表与组织架构 -->
+            <div class="trace-left">
+                <div class="trace-left-header">
+                    <i class="fa-solid fa-list"></i> 本批次挖掘队列
+                </div>
+                
+                <div class="opp-list-area">
+                    <div style="padding: 12px 16px; font-size: 12px; color: var(--text-muted); background: #FAFAFC; border-bottom: 1px solid var(--border-color);">
+                        批次：Batch_20260304_AM (共4条)
+                    </div>
+                    <div class="opp-item active">
+                        <div class="opp-title">固能科技(B公司) <span style="color: var(--rank-S); font-size:12px; background:#FFF1F0; padding:2px 4px; border-radius:4px;">S级</span></div>
+                        <div class="opp-desc">固态电池赛道，存量转化升级。</div>
+                    </div>
+                    <div class="opp-item">
+                        <div class="opp-title">智谱AI <span style="color: var(--warning); font-size:12px; background:#FFFBE6; padding:2px 4px; border-radius:4px;">A级</span></div>
+                        <div class="opp-desc">LLM大模型，端侧模型发布。</div>
+                    </div>
+                    <div class="opp-item">
+                        <div class="opp-title">大疆创新 <span style="color: var(--warning); font-size:12px; background:#FFFBE6; padding:2px 4px; border-radius:4px;">A级</span></div>
+                        <div class="opp-desc">低空经济，载人eVTOL供应链。</div>
+                    </div>
+                </div>
+
+                <!-- 新增：Agent 组织架构拓扑图 -->
+                <div class="topology-area">
+                    <div class="topo-title"><i class="fa-solid fa-sitemap"></i> 任务架构 (Agent Topology)</div>
+                    <div class="topo-tree">
+                        <div class="topo-node master" onclick="openAgentConfig('Master 统筹指挥官')">
+                            <i class="fa-solid fa-brain" style="color:var(--tech-blue);"></i> Master 统筹官
+                        </div>
+                        <div class="topo-branches">
+                            <div class="topo-branches-line2"></div>
+                            <div class="topo-node" onclick="openAgentConfig('Sub-1 业务研判')"><i class="fa-solid fa-briefcase" style="color:#1890FF;"></i> Sub-1 业务</div>
+                            <div class="topo-node" onclick="openAgentConfig('Sub-2 深度行研')"><i class="fa-solid fa-microscope" style="color:#722ED1;"></i> Sub-2 行研</div>
+                            <div class="topo-node" onclick="openAgentConfig('Sub-3 风险排雷')"><i class="fa-solid fa-shield-virus" style="color:var(--danger);"></i> Sub-3 风险</div>
+                            <div class="topo-node" onclick="openAgentConfig('Sub-4 产品案例')"><i class="fa-solid fa-box-open" style="color:var(--warning);"></i> Sub-4 产品</div>
+                        </div>
+                    </div>
+                    <div style="font-size: 11px; color: #999; text-align: center; margin-top: auto;">点击节点可查看 Agent 的 Prompt/Skill 及会议发言</div>
+                </div>
+            </div>
+
+            <!-- 中间：会议复盘时间轴 -->
+            <div class="trace-middle" id="trace-middle-area">
+                <div class="process-title">
+                    <i class="fa-solid fa-timeline"></i> 固能科技(B公司) - Agent 协作会议日志
+                </div>
+                <div class="meeting-intro">
+                    <i class="fa-solid fa-circle-info"></i> <strong>后台记录：</strong>Master Agent 作为会议主持，严格控制着讨论节奏。以下是系统记录的 Agent 多体协作与博弈全过程。
+                </div>
+
+                <!-- ================= 第一轮 ================= -->
+                <div class="round-divider"><span>第一轮：核心矛盾暴露</span></div>
+
+                <!-- Master Agent -->
+                <div class="agent-msg">
+                    <div class="agent-avatar av-master"><i class="fa-solid fa-brain"></i></div>
+                    <div class="agent-content master-box">
+                        <div class="agent-header">
+                            <span class="agent-name">Master Agent (策略统筹官)</span>
+                            <span class="agent-time">02:15:00</span>
+                        </div>
+                        <div class="sys-badges">
+                            <span class="s-badge action"><i class="fa-solid fa-bolt"></i> 触发事件：市发改委名单更新</span>
+                            <span class="s-badge done"><i class="fa-solid fa-check"></i> 行内过往信贷数据对接</span>
+                            <span class="s-badge done"><i class="fa-solid fa-check"></i> 生命周期评估模型调用</span>
+                        </div>
+                        <div class="content-block">
+                            <p><strong>任务下发：</strong>客户当前持有产品：基础结算账户、500 万“税务贷”（即将到期）。根据生命周期评估，企业处于成长期。由于过往同业客户质量较低，请 Sub-1 (业务) 与 Sub-3 (风险) 并行介入，进行评估。</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-1 业务 -->
+                <div class="agent-msg">
+                    <div class="agent-avatar av-bd"><i class="fa-solid fa-briefcase"></i></div>
+                    <div class="agent-content">
+                        <div class="agent-header">
+                            <span class="agent-name">Sub-1 (业务研判 Agent)</span>
+                            <span class="agent-time">02:28:10</span>
+                        </div>
+                        <div class="sys-badges">
+                            <span class="s-badge done"><i class="fa-solid fa-check"></i> 财务指标提取</span>
+                            <span class="s-badge done"><i class="fa-solid fa-check"></i> 政策激励策略匹配</span>
+                        </div>
+                        <div class="conclusion-box success-alert">
+                            <strong>结论：强烈推荐增加授信。</strong>
+                        </div>
+                        <div class="content-block" style="margin-top:12px;">
+                            <strong>理由：</strong>
+                            <ul class="reasons">
+                                <li>B公司采用氧化物+聚合物复合电解质路线，当前中试线能量密度达350Wh/kg，已送样某新势力车企。</li>
+                                <li>结合市发改委12号文，入选企业可享受：产线建设补贴最高 800 万、研发加计扣除提升至 150%。</li>
+                            </ul>
+                        </div>
+                        <div class="content-block">
+                            <strong>建议：</strong>迅速启动"存量客户政策红利承接"营销，升级为"政策配套综合金融服务主办行"，锁定政府风险补偿池名额。
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-3 风险 -->
+                <div class="agent-msg">
+                    <div class="agent-avatar av-risk"><i class="fa-solid fa-shield-virus"></i></div>
+                    <div class="agent-content">
+                        <div class="agent-header">
+                            <span class="agent-name">Sub-3 (风险排雷 Agent)</span>
+                            <span class="agent-time">02:29:45</span>
+                        </div>
+                        <div class="sys-badges">
+                            <span class="s-badge done"><i class="fa-solid fa-check"></i> 资金燃烧率预警调用</span>
+                            <span class="s-badge done"><i class="fa-solid fa-check"></i> 异常检测与穿透</span>
+                        </div>
+                        <div class="conclusion-box risk-alert">
+                            <strong>结论：谨慎扩大敞口。</strong>
+                        </div>
+                        <div class="content-block" style="margin-top:12px;">
+                            <strong>理由：</strong>原有500万贷表现正常，但存在三重风险：
+                            <ul class="reasons">
+                                <li>技术路线风险：硫化物路线若突破，可能挤压其氧化物路线空间。</li>
+                                <li>量产风险：当前中试线良率85%（量产阈值需≥95%），扩产存在一致性风险。</li>
+                                <li>客户集中风险：80%营收依赖单一客户，车规级验证周期长，存在收入空窗期。</li>
+                            </ul>
+                        </div>
+                        <div class="content-block">
+                            <strong>建议：</strong>维持原有授信不变，或新增部分必须绑定“技术里程碑+订单落地”双触发条件，并要求实控人连带担保。
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Master Agent 冲突处理 -->
+                <div class="agent-msg">
+                    <div class="agent-avatar av-master"><i class="fa-solid fa-brain"></i></div>
+                    <div class="agent-content master-box">
+                        <div class="agent-header">
+                            <span class="agent-name">Master Agent (策略统筹官)</span>
+                            <span class="agent-time">02:30:00</span>
+                        </div>
+                        <div class="sys-badges">
+                            <span class="s-badge conflict"><i class="fa-solid fa-triangle-exclamation"></i> 冲突检测：内部无法消化</span>
+                            <span class="s-badge action"><i class="fa-solid fa-user-plus"></i> 动作：动态拉新 (邀请 Sub-2)</span>
+                        </div>
+                        <div class="content-block">
+                            <p><strong>分析：</strong>双方基于现有数据无法达成一致。核心矛盾在于对“资金燃烧率（Burn Rate）”的归因不一致。财务数据无法区分这是“低效运营消耗”还是“战略性资本开支”。</p>
+                            <p><strong>决策：</strong>这是纯财务模型无法解决的盲区，需引入产业视角进行穿透。邀请 Sub-2 (行研) 加入讨论组。</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= 第二轮 ================= -->
+                <div class="round-divider"><span>第二轮：多维变量化解冲突</span></div>
+
+                <!-- Master Agent -->
+                <div class="agent-msg">
+                    <div class="agent-avatar av-master"><i class="fa-solid fa-brain"></i></div>
+                    <div class="agent-content master-box" style="padding: 12px 20px;">
+                        <span class="agent-time" style="float:right;">02:30:05</span>
+                        <strong><i class="fa-solid fa-bullhorn"></i> 指令给 Sub-2：</strong> 请穿透财务数据，验证 Sub-3 提到的“高燃烧率”是否对应关键设备投入？评估其技术路线在行业中的 TRL 等级。
+                    </div>
+                </div>
+
+                <!-- Sub-2 行研 -->
+                <div class="agent-msg">
+                    <div class="agent-avatar av-tech"><i class="fa-solid fa-microscope"></i></div>
+                    <div class="agent-content">
+                        <div class="agent-header">
+                            <span class="agent-name">Sub-2 (深度行研技术 Agent)</span>
+                            <span class="agent-time">03:05:20</span>
+                        </div>
+                        <div class="sys-badges">
+                            <span class="s-badge done"><i class="fa-solid fa-check"></i> 长专利文本解析</span>
+                            <span class="s-badge done"><i class="fa-solid fa-check"></i> 产业链设备采购验证</span>
+                        </div>
+                        <div class="conclusion-box success-alert">
+                            <strong>报告：【技术投入有效性验证通过】</strong>
+                        </div>
+                        <div class="content-block" style="margin-top:12px;">
+                            <strong>深度分析：</strong>
+                            <ol style="margin-left: 20px; color: var(--text-muted); line-height: 1.6;">
+                                <li><strong>燃烧归因：</strong>近6个月现金流为负的主因是干法电极设备预付款，属战略性，非经营性亏损。</li>
+                                <li><strong>技术成熟度：</strong>TRL等级为 6-7 级（准备量产）。室温离子电导率已达量产门槛。</li>
+                                <li><strong>验证节点：</strong>已通过消费电子 A 样验证，正处车企 B 样测试关键期（预计6个月出结果）。资金需求最大，但也是估值跃升前夜。</li>
+                            </ol>
+                        </div>
+                        <div class="content-block">
+                            <strong>结论：</strong>财务上的“高风险”实为产业周期的“高投入期”。技术资产具备强变现潜力，可视为隐性增信。
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-4 产品 -->
+                <div class="agent-msg">
+                    <div class="agent-avatar av-prod"><i class="fa-solid fa-box-open"></i></div>
+                    <div class="agent-content">
+                        <div class="agent-header">
+                            <span class="agent-name">Sub-4 (产品与案例 Agent)</span>
+                            <span class="agent-time">03:08:15</span>
+                        </div>
+                        <div class="sys-badges">
+                            <span class="s-badge done"><i class="fa-solid fa-check"></i> 同业案例检索</span>
+                            <span class="s-badge done"><i class="fa-solid fa-check"></i> 融资需求动态测算</span>
+                        </div>
+                        <div class="conclusion-box">
+                            <strong>报告：【存量客户升级方案已生成】</strong>
+                        </div>
+                        <div class="content-block" style="margin-top:12px;">
+                            <p>原有“税务贷”无法满足扩产需求。建议采用 "1+N" 产品组合策略：</p>
+                            <ul class="reasons">
+                                <li><strong>置换升级：</strong>将到期 500 万“税务贷”置换为“科创专属贷”（额度提升至 2000 万，基于专利质押）。</li>
+                                <li><strong>交叉销售：</strong>绑定“供应链金融”（锁定上游）+ “代发工资”（锁定下游回款）。</li>
+                                <li><strong>案例匹配：</strong>匹配同行案例"D新能源"，通过组合将钱包份额从 10% 提升至 60%。</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= 第三轮 ================= -->
+                <div class="round-divider"><span>第三轮：策略合成与合规终检</span></div>
+
+                <!-- Master Agent 终局 -->
+                <div class="agent-msg">
+                    <div class="agent-avatar av-master"><i class="fa-solid fa-brain"></i></div>
+                    <div class="agent-content master-box">
+                        <div class="agent-header">
+                            <span class="agent-name">Master Agent (策略统筹官)</span>
+                            <span class="agent-time">03:20:00</span>
+                        </div>
+                        <div class="content-block">
+                            <strong>综合研判与策略合成：</strong>
+                            <ul class="reasons">
+                                <li><i class="fa-solid fa-plus" style="color:var(--tech-blue);"></i> 采纳 Sub-1：利用政府风险补偿池抢占政策窗口期。</li>
+                                <li><i class="fa-solid fa-plus" style="color:var(--tech-blue);"></i> 采纳 Sub-3：通过资金闭环管理确保存量资产安全。</li>
+                                <li><i class="fa-solid fa-plus" style="color:var(--tech-blue);"></i> 采纳 Sub-2：核心专利质押作为核心担保方式。</li>
+                                <li><i class="fa-solid fa-plus" style="color:var(--tech-blue);"></i> 采纳 Sub-4：以"贷+投+链+薪"实现钱包份额跃升。</li>
+                            </ul>
+                        </div>
+                        <div class="conclusion-box success-alert" style="margin-top: 16px;">
+                            <strong>最终策略：</strong>总额 2000 万授信方案（置换500万+新增1500万），担保为“专利质押+政府风险分担+回款账户锁定”。
+                        </div>
+                        <div class="content-block" style="margin-top: 16px;">
+                            <p><strong>合规校验：</strong>符合提级规定。当前评级 R3 在分行权限内，无需推送 Human-in-the-Loop 审批。<br>
+                            <span style="color:var(--success); font-weight:bold;"><i class="fa-solid fa-wand-magic-sparkles"></i> 动作：生成最终营销策略包，推送至前端看板。</span></p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="round-divider"><span>03:40:00 | 任务结束，全体 Agent 休眠。</span></div>
+            </div>
+
+            <!-- 右侧：产出物视图 (按剧本梳理) -->
+            <div class="trace-right">
+                <div class="right-title"><i class="fa-solid fa-box-archive"></i> 任务挂载与产出物</div>
+                
+                <div class="output-group">
+                    <div class="output-group-title">1. 输入域 / 发现线索</div>
+                    <div class="doc-file">
+                        <i class="fa-solid fa-file-pdf doc-icon"></i>
+                        <div class="doc-info">
+                            <div class="doc-name">市发改委重点科创名单(12号文).pdf</div>
+                            <div class="doc-meta"><span>原始线索触发</span></div>
+                        </div>
+                    </div>
+                    <div class="doc-file">
+                        <i class="fa-solid fa-file-excel doc-icon excel"></i>
+                        <div class="doc-info">
+                            <div class="doc-name">B公司历史信贷与CRM流水.xlsx</div>
+                            <div class="doc-meta"><span>行内数据提取</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="output-group">
+                    <div class="output-group-title">2. Agent 搜集分析素材</div>
+                    <div class="doc-file">
+                        <i class="fa-solid fa-chart-network doc-icon image"></i>
+                        <div class="doc-info">
+                            <div class="doc-name">B公司产业链穿透与图谱.png</div>
+                            <div class="doc-meta"><span style="color:var(--tech-blue);"><i class="fa-solid fa-eye"></i> 预览图谱</span></div>
+                        </div>
+                    </div>
+                    <div class="doc-file">
+                        <i class="fa-solid fa-file-pdf doc-icon"></i>
+                        <div class="doc-info">
+                            <div class="doc-name">设备采购数据报关核验单.pdf</div>
+                            <div class="doc-meta"><span>Sub-2 提取</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="output-group">
+                    <div class="output-group-title">3. 子 Agent 独立研判报告</div>
+                    <div class="doc-file">
+                        <i class="fa-solid fa-file-word doc-icon word"></i>
+                        <div class="doc-info">
+                            <div class="doc-name">业务回报潜力与政策评估.docx</div>
+                            <div class="doc-meta"><span>Sub-1 产出</span></div>
+                        </div>
+                    </div>
+                    <div class="doc-file">
+                        <i class="fa-solid fa-file-word doc-icon word"></i>
+                        <div class="doc-info">
+                            <div class="doc-name">技术成熟度(TRL)验证报告.docx</div>
+                            <div class="doc-meta"><span>Sub-2 产出</span></div>
+                        </div>
+                    </div>
+                    <div class="doc-file" style="border-left: 3px solid var(--danger);">
+                        <i class="fa-solid fa-file-word doc-icon word"></i>
+                        <div class="doc-info">
+                            <div class="doc-name">资金燃烧率预警分析.docx</div>
+                            <div class="doc-meta"><span style="color:var(--danger);">Sub-3 产出 (含警告)</span></div>
+                        </div>
+                    </div>
+                    <div class="doc-file" style="border-left: 3px solid var(--warning);" onclick="alert('测算依据：产线投资计划、设备清单、建设周期、自有资金。\n结论：缺口为 2000-2500万元。')">
+                        <i class="fa-solid fa-file-pdf doc-icon"></i>
+                        <div class="doc-info">
+                            <div class="doc-name">融资需求动态测算模型报告.pdf</div>
+                            <div class="doc-meta"><span style="color:var(--warning); font-weight:bold;">★ 提示缺口 2000-2500万</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="output-group">
+                    <div class="output-group-title" style="color:var(--primary-blue);">✨ 最终合成策略方案</div>
+                    <div class="doc-file" style="border-left: 4px solid var(--success); background: #F6FFED;">
+                        <i class="fa-solid fa-file-pdf doc-icon" style="color:var(--primary-blue);"></i>
+                        <div class="doc-info">
+                            <div class="doc-name">B公司科创专属营销商业计划书.pdf</div>
+                            <div class="doc-meta"><span style="color:var(--tech-blue);"><i class="fa-solid fa-check-double"></i> Master 合成推送</span><span>2.1 MB</span></div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= 弹窗：Agent 节点信息查看 ================= -->
+    <div id="modal-agent-config" class="modal-overlay">
+        <div class="modal-box" style="width: 600px;">
+            <div class="modal-header">
+                <span id="cfg-title"><i class="fa-solid fa-id-badge"></i> 节点信息：</span>
+                <i class="fa-solid fa-xmark" onclick="closeConfigModal()"></i>
+            </div>
+            <div class="modal-body">
+                <div style="font-weight: bold; margin-bottom: 8px;">挂载的专用模型/技能 (Skills)：</div>
+                <div id="cfg-skills" style="margin-bottom: 20px;">
+                    <!-- 动态注入 -->
+                </div>
+                <div style="font-weight: bold; margin-bottom: 8px;">系统设定核心提示词 (System Prompt)：</div>
+                <div class="config-code" id="cfg-prompt">
+                    <!-- 动态注入 -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeConfigModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Agent 架构图点击交互数据
+        const agentData = {
+            'Master 统筹指挥官': {
+                skills: ['<i class="fa-solid fa-scale-balanced"></i> 策略博弈与冲突解决引擎', '<i class="fa-solid fa-gavel"></i> 行内合规与风控底线规则库'],
+                prompt: "你是 Master Agent。负责任务分发、冲突检测与综合决策。\n当 Sub-Agent 结论出现矛盾时，你需要敏锐察觉（如燃烧率的归因问题），并动态邀请其他视角的 Agent 进行交叉验证。\n严守合规底线，生成最优的综合金融方案包。"
+            },
+            'Sub-1 业务研判': {
+                skills: ['<i class="fa-solid fa-chart-line"></i> 企业生命周期评估模型', '<i class="fa-solid fa-file-invoice-dollar"></i> 政府政策补贴与红利 RAG 库'],
+                prompt: "你是 业务研判 Agent。你需要从收益和增长的角度看待企业。\n忽略短期的负面财务亏损，重点提取：政府补贴红利、最新融资动态、产能扩张信号。\n你的目标是找到‘做这笔业务的绝对理由’并推荐扩大合作。"
+            },
+            'Sub-2 深度行研': {
+                skills: ['<i class="fa-solid fa-magnifying-glass-chart"></i> 专利长文本解析大模型', '<i class="fa-solid fa-microchip"></i> 产业链景气度与 TRL 成熟度库'],
+                prompt: "你是 深度行研 Agent。\n你需要穿透表面的财务数据，分析企业底层的核心技术壁垒。例如分析固态电池的电导率、中试线良率。\n为其他 Agent 提供客观的技术成熟度(TRL)背书，判断其资本开支的合理性。"
+            },
+            'Sub-3 风险排雷': {
+                skills: ['<i class="fa-solid fa-fire"></i> 资金燃烧率预警预测模型', '<i class="fa-solid fa-sitemap"></i> 股权穿透与司法涉诉接口'],
+                prompt: "你是 风险排雷 Agent。\n你是一个极度悲观的角色。你需要找出所有可能导致坏账的隐患：技术被替代的风险、客户过于集中的风险、资金链断裂的风险。\n坚守风控底线，如果建议放款，必须提出强有力的增信和资金闭环监管要求。"
+            },
+            'Sub-4 产品案例': {
+                skills: ['<i class="fa-solid fa-calculator"></i> 融资需求动态测算模型', '<i class="fa-solid fa-box-open"></i> 行内产品与同业成功案例库'],
+                prompt: "你是 产品与案例 Agent。\n根据企业测算出的资金缺口（需调用模型计算设备清单与建设周期），匹配最适合的行内产品组合。\n擅长通过‘交叉销售’（如代发工资、供应链）提升客户在我行的综合收益份额。"
+            }
+        };
+
+        function openAgentConfig(agentName) {
+            const data = agentData[agentName];
+            if(data) {
+                document.getElementById('cfg-title').innerHTML = `<i class="fa-solid fa-id-badge"></i> 节点详情：${agentName}`;
+                document.getElementById('cfg-skills').innerHTML = data.skills.map(s => `<span class="skill-tag">${s}</span>`).join('');
+                document.getElementById('cfg-prompt').innerText = data.prompt;
+                document.getElementById('modal-agent-config').style.display = 'flex';
+            }
+        }
+
+        function closeConfigModal() {
+            document.getElementById('modal-agent-config').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
